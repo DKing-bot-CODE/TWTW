@@ -389,10 +389,13 @@ function renderDisposals(data){
     const nthBadge = `<span class="nth-badge nth-${Math.min(nth,3)}">${nth === 1 ? '第1次' : nth === 2 ? '第2次' : '第'+nth+'次'}處置</span>`;
     const mktBadge = `<span class="mbadge ${d.market.toLowerCase()}">${d.market}</span>`;
 
+    // 民國日期轉西元 115/03/10 → 2026/03/10
+    const periodAD = (d.period||d.DispositionPeriod||'').replace(/(\d{3})\//g, function(m,y){ return (parseInt(y)+1911)+'/'; });
+
     // 從 Detail 擷取撮合間隔
     const detail = d.Detail || d.detail || '';
     const ivlMatch = detail.match(/約每(\S+?)分鐘撮合/);
-    const interval = ivlMatch ? `每 ${ivlMatch[1]} 分鐘撮合一次` : (d.DispositionMeasures || d.measures || '—');
+    const interval = ivlMatch ? `每 ${ivlMatch[1]} 分鐘撮合一次` : (d.measures || d.DispositionMeasures || '—');
 
     return `<div class="disp-card">
       <div class="dc-header">
@@ -409,7 +412,7 @@ function renderDisposals(data){
         </div>
       </div>
       <div class="dc-body">
-        <div class="dc-period">📅 ${d.period || d.DispositionPeriod || '—'}</div>
+        <div class="dc-period">📅 ${periodAD || '—'}</div>
         <div class="dc-row"><span class="dc-row-lbl">處置原因</span><span class="dc-row-val normal">${d.reason || d.ReasonsOfDisposition || '—'}</span></div>
         <div class="dc-measures">⏱ ${interval}</div>
         ${detail ? `<div class="dc-reason">${detail.slice(0,120).replace(/\n/g,' ')}${detail.length>120?'...':''}</div>` : ''}
@@ -561,7 +564,7 @@ async function fetchAll(){
   // 2. TPEX 處置股
   let tpexDP = [];
   try {
-    const raw = await fetchJSON(API.tpexDisposal, 'TPEX 處置股');
+    const raw = await tryTPEX(TPEX_DISPOSAL_CANDIDATES, '處置股');
     // 實際欄位：SecuritiesCompanyCode, CompanyName,
     //           DispositionPeriod("1150323~1150407"),
     //           DispositionReasons, DispositionCondition（含撮合間隔）
