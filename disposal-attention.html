@@ -624,18 +624,26 @@ async function fetchAll(){
   let tpexAT = [];
   try {
     const raw = await tryTPEX(TPEX_ATTENTION_CANDIDATES, '注意股');
+    // 欄位：SecuritiesCompanyCode, CompanyName, TradingInformation（漲幅資訊字串）
+    // TradingInformation 範例："最近六個營業日(含當日)累積之最後成交價漲幅達50.16%..."
+    // 解析邏輯：字串內「第X款」的出現次數代表觸發次數
     tpexAT = raw.map(r => {
-      const parsed = parseAttentionCriteria(
-        r['RecentlyMetAttentionSecuritiesCriteria'] || r['注意原因'] || r['AttentionReason'] || ''
-      );
+      const info = r.TradingInformation || '';
+      // 計算觸發款數（第一款、第二款...）當作注意次數
+      const matches = info.match(/第[一二三四五六七八九十]+款/g) || [];
+      const total = matches.length || 1;
+      // TPEX 注意股沒有連續天數欄位，用款數推算
+      const consec = total >= 2 ? 2 : 1;
+      const recent30 = total >= 2 ? 1 : 0;
+
       return {
-        code:     r['股票代號'] || r.Code || '',
-        name:     r['股票名稱'] || r.Name || '',
+        code:     r.SecuritiesCompanyCode || '',
+        name:     r.CompanyName || '',
         market:   'TPEX',
-        total:    parsed.total,
-        consec:   parsed.consec,
-        recent30: parsed.recent30,
-        desc:     parsed.desc,
+        total,
+        consec,
+        recent30,
+        desc:     info.slice(0, 60) + (info.length > 60 ? '...' : ''),
       };
     }).filter(r => r.code);
   } catch(e){ /* TPEX 注意股失敗不顯示錯誤，僅 console */ console.warn('TPEX 注意股：', e.message); }
