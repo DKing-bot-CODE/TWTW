@@ -271,14 +271,10 @@ const API = {
 
 // TPEX 端點候選清單（逐一嘗試）
 const TPEX_DISPOSAL_CANDIDATES = [
-  'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_disposal_information',
-  'https://www.tpex.org.tw/openapi/v1/tpex_disposal_stock',
-  'https://www.tpex.org.tw/openapi/v1/tpex_punish_information',
+  'https://www.tpex.org.tw/openapi/v1/tpex_disposal_information',
 ];
 const TPEX_ATTENTION_CANDIDATES = [
-  'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_attention_information',
-  'https://www.tpex.org.tw/openapi/v1/tpex_attention_stock',
-  'https://www.tpex.org.tw/openapi/v1/tpex_notetrans_information',
+  'https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information',
 ];
 
 async function tryTPEX(candidates, label) {
@@ -497,21 +493,38 @@ function renderAttention(data){
 // ── 除錯 ──
 let _rawAttention = [];
 async function debugAPI(){
+  let out = '';
+  // TWSE 注意股
   try{
     const res = await fetch(API.twseAttention);
     const raw = await res.json();
-    _rawAttention = Array.isArray(raw) ? raw : [];
-    const preview = _rawAttention.slice(0,2);
-    document.getElementById('debugContent').textContent =
-      '=== TWSE 注意股 API 欄位 ===\n' +
-      (preview.length ? JSON.stringify(preview, null, 2) : '（無資料）') +
-      '\n\n=== 所有欄位名稱 ===' +
-      (preview.length ? '\n' + Object.keys(preview[0]).join('\n') : '');
-    document.getElementById('debugBox').style.display='block';
-  } catch(e){
-    document.getElementById('debugContent').textContent = '錯誤：' + e.message;
-    document.getElementById('debugBox').style.display='block';
-  }
+    const preview = (Array.isArray(raw)?raw:[]).slice(0,1);
+    out += '=== TWSE 注意股欄位 ===\n';
+    out += preview.length ? JSON.stringify(preview[0], null, 2) : '（無資料）';
+    out += '\n\n';
+  } catch(e){ out += 'TWSE 注意股錯誤：' + e.message + '\n\n'; }
+
+  // TPEX 處置股
+  try{
+    const res2 = await fetch(p('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'));
+    const raw2 = await res2.json();
+    const preview2 = (Array.isArray(raw2)?raw2:[]).slice(0,1);
+    out += '=== TPEX 處置股欄位 ===\n';
+    out += preview2.length ? JSON.stringify(preview2[0], null, 2) : '（無資料）';
+    out += '\n\n';
+  } catch(e){ out += 'TPEX 處置股錯誤：' + e.message + '\n\n'; }
+
+  // TPEX 注意股
+  try{
+    const res3 = await fetch(p('https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information'));
+    const raw3 = await res3.json();
+    const preview3 = (Array.isArray(raw3)?raw3:[]).slice(0,1);
+    out += '=== TPEX 注意股欄位 ===\n';
+    out += preview3.length ? JSON.stringify(preview3[0], null, 2) : '（無資料）';
+  } catch(e){ out += 'TPEX 注意股錯誤：' + e.message; }
+
+  document.getElementById('debugContent').textContent = out;
+  document.getElementById('debugBox').style.display='block';
 }
 
 // ── 主抓取 ──
