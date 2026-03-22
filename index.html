@@ -407,24 +407,28 @@ async function fetchAll() {
   } catch(e) { errors.push(e.message); }
 
   // 3. 上櫃漲停股 (tpex_mainboard_daily_close_quotes)
+  // 欄位：SecuritiesCompanyCode, CompanyName, Close, Change, NextLimitUp, TradingShares
+  // Change 格式："+0.11" 或 "-0.23 "（有空格），NextLimitUp = 今日漲停價
   let tpexLU = [];
   try {
     setStep('上櫃漲停股（TPEX）...');
     const raw = await fetchTPEX('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes');
     tpexLU = (Array.isArray(raw) ? raw : []).filter(r => {
-      const chg = parseFloat(r['Change'] || r['漲跌'] || r['PriceChange'] || '0');
-      const cls = parseFloat(r['Close']  || r['收盤價'] || r['ClosingPrice'] || '0');
-      const prev = cls - chg;
+      // Change 格式："+1.23" 或 "-0.50 "（可能有空格或加號）
+      const chg   = parseFloat((r.Change || '0').toString().trim());
+      const close = parseFloat(r.Close || '0');
+      const prev  = close - chg;
+      // 漲幅 >= 9.5% 判定為漲停（上櫃漲跌幅限制 10%）
       return chg > 0 && prev > 0 && (chg / prev) >= 0.095;
     }).map(r => ({
-      code:   r['SecuritiesCompanyCode'] || r['Code'] || r['股票代號'] || '',
-      name:   r['CompanyName'] || r['Name'] || r['股票名稱'] || '',
-      close:  parseFloat(r['Close'] || r['收盤價'] || r['ClosingPrice'] || '0'),
-      change: parseFloat(r['Change'] || r['漲跌'] || '0'),
-      vol:    parseInt((r['TradingShares'] || r['成交股數'] || r['Volume'] || '0').toString().replace(/,/g,''), 10),
+      code:   r.SecuritiesCompanyCode || '',
+      name:   r.CompanyName || '',
+      close:  parseFloat(r.Close || '0'),
+      change: parseFloat((r.Change || '0').toString().trim()),
+      vol:    parseInt((r.TradingShares || '0').toString().replace(/,/g,''), 10),
       market: 'TPEX',
-    })).filter(r => r.code && r.code.length <= 4);
-  } catch(e) { errors.push(e.message); }
+    })).filter(r => r.code && r.code.length <= 4 && r.close > 0);
+  } catch(e) { errors.push('TPEX 漲停：' + e.message); }
 
   // 4. 上櫃處置股 (tpex_disposal_information)
   let tpexDP = [];
