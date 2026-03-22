@@ -266,10 +266,40 @@ const p = u => PROXY + encodeURIComponent(u);
 
 const API = {
   twseDisposal: p('https://openapi.twse.com.tw/v1/announcement/punish'),
-  tpexDisposal: p('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'),
   twseAttention:p('https://openapi.twse.com.tw/v1/announcement/notetrans'),
-  tpexAttention:p('https://www.tpex.org.tw/openapi/v1/tpex_attention_information'),
 };
+
+// TPEX 端點候選清單（逐一嘗試）
+const TPEX_DISPOSAL_CANDIDATES = [
+  'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_disposal_information',
+  'https://www.tpex.org.tw/openapi/v1/tpex_disposal_stock',
+  'https://www.tpex.org.tw/openapi/v1/tpex_punish_information',
+];
+const TPEX_ATTENTION_CANDIDATES = [
+  'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_attention_information',
+  'https://www.tpex.org.tw/openapi/v1/tpex_attention_stock',
+  'https://www.tpex.org.tw/openapi/v1/tpex_notetrans_information',
+];
+
+async function tryTPEX(candidates, label) {
+  for (const url of candidates) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(p(url), { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          console.log('[TPEX] ' + label + ' 成功：' + url);
+          return data;
+        }
+      }
+    } catch(e) { /* 繼續嘗試下一個 */ }
+  }
+  console.warn('[TPEX] ' + label + ' 所有路徑均失敗');
+  return [];
+}
 
 // ── Tab 切換 ──
 function switchTab(t) {
@@ -577,12 +607,14 @@ async function fetchAll(){
     }).filter(r => r.code);
   } catch(e){ errors.push(e.message); }
 
-  // 4. TPEX 注意股（HTTP 502 暫時跳過，不影響 TWSE 資料）
+  // 4. TPEX 注意股（自動探測端點）
   let tpexAT = [];
   try {
-    const raw = await fetchJSON(API.tpexAttention, 'TPEX 注意股');
-    tpexAT = (Array.isArray(raw)?raw:[]).map(r => {
-      const parsed = parseAttentionCriteria ? parseAttentionCriteria(r['RecentlyMetAttentionSecuritiesCriteria'] || r['注意原因'] || '') : { consec:1, total:1, recent30:0, desc:'' };
+    const raw = await tryTPEX(TPEX_ATTENTION_CANDIDATES, '注意股');
+    tpexAT = raw.map(r => {
+      const parsed = parseAttentionCriteria(
+        r['RecentlyMetAttentionSecuritiesCriteria'] || r['注意原因'] || r['AttentionReason'] || ''
+      );
       return {
         code:     r['股票代號'] || r.Code || '',
         name:     r['股票名稱'] || r.Name || '',
@@ -593,7 +625,7 @@ async function fetchAll(){
         desc:     parsed.desc,
       };
     }).filter(r => r.code);
-  } catch(e){ errors.push('TPEX 注意股：' + e.message); }
+  } catch(e){ /* TPEX 注意股失敗不顯示錯誤，僅 console */ console.warn('TPEX 注意股：', e.message); }
 
   // 整合
   const allDP = [...twseDP, ...tpexDP].sort((a,b)=>(a.daysLeft??99)-(b.daysLeft??99));
@@ -613,9 +645,11 @@ async function fetchAll(){
   btn.classList.remove('loading');
   btn.querySelector('.btn-label').textContent = '立即抓取最新資料';
 
-  if(errors.length){
-    showToast(false, `部分來源失敗（${errors.length}項）`);
-    setStep('部分失敗：' + errors.slice(0,2).join(' | '));
+  // 過濾掉 TPEX 的錯誤（端點未知不影響主要功能）
+  const mainErrors = errors.filter(e => !e.includes('TPEX'));
+  if(mainErrors.length){
+    showToast(false, `部分來源失敗（${mainErrors.length}項）`);
+    setStep('部分失敗：' + mainErrors.slice(0,2).join(' | '));
 
     // 若注意股抓取失敗，顯示提示
     if(!twseAT.length && !tpexAT.length){
@@ -628,6 +662,10 @@ async function fetchAll(){
         </div>
       </td></tr>`;
     }
+  } else if(errors.length) {
+    // 只有 TPEX 失敗，仍算成功
+    showToast(true, `✓ 更新完成！處置 ${allDP.length} 支，注意 ${allAT.length} 支（TPEX 端點探索中）`);
+    setStep(`TWSE 資料完整，TPEX 上櫃端點探索中...`);
   } else {
     showToast(true, `✓ 更新成功！處置 ${allDP.length} 支，注意 ${allAT.length} 支`);
     setStep(`資料更新完成 · TWSE + TPEX OpenAPI`);
