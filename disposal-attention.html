@@ -262,7 +262,13 @@ tbody td.r{text-align:right;font-family:'JetBrains Mono',monospace;}
 
 <script>
 const PROXY = 'https://corsproxy.io/?url=';
-const p = u => PROXY + encodeURIComponent(u);
+const PROXY_TPEX = 'https://api.allorigins.win/raw?url=';
+
+// TWSE 用 corsproxy，TPEX 用 allorigins（corsproxy 被 TPEX 擋住）
+const p = u => {
+  if (u.includes('tpex.org.tw')) return PROXY_TPEX + encodeURIComponent(u);
+  return PROXY + encodeURIComponent(u);
+};
 
 const API = {
   twseDisposal: p('https://openapi.twse.com.tw/v1/announcement/punish'),
