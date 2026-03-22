@@ -227,11 +227,30 @@ tbody td:first-child{text-align:left;font-family:'Noto Sans TC',sans-serif;}
 // ── API 端點（已驗證可用）──
 // CORS Proxy — 解決瀏覽器跨域限制
 const PROXY = 'https://corsproxy.io/?url=';
-const PROXY_TPEX = 'https://api.allorigins.win/raw?url=';
-const p = u => {
-  if (u.includes('tpex.org.tw')) return PROXY_TPEX + encodeURIComponent(u);
-  return PROXY + encodeURIComponent(u);
-};
+const p = u => PROXY + encodeURIComponent(u);
+
+// TPEX 輪流嘗試多個 proxy
+const TPEX_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://thingproxy.freeboard.io/fetch/',
+];
+async function fetchTPEX(url) {
+  for (const proxy of TPEX_PROXIES) {
+    try {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(proxy + encodeURIComponent(url), { signal: ctrl.signal });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[TPEX OK]', proxy.split('?')[0]);
+        return data;
+      }
+    } catch(e) { console.warn('[TPEX fail]', e.message); }
+  }
+  throw new Error('所有 TPEX proxy 均失敗');
+}
 
 const API = {
   twseDayAll:   p('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL'),
@@ -280,22 +299,38 @@ async function fetchJSON(url, label) {
 
 // ── 除錯：印出 TPEX 原始欄位 ──
 async function debugTPEX(){
+  // 建立或重用除錯視窗
+  let box = document.getElementById('tpexDebugBox');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'tpexDebugBox';
+    box.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);width:90%;max-width:680px;max-height:75vh;overflow-y:auto;background:#0f1218;border:1px solid #1a6cf0;border-radius:8px;padding:16px;z-index:9999;font-family:monospace;font-size:12px;color:#c8d4e0;';
+    box.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:10px;"><strong style="color:#e8f0f8">🔍 TPEX 除錯</strong><button onclick="this.closest(\'#tpexDebugBox\').remove()" style="background:rgba(232,22,42,.2);color:#ff8090;border:1px solid rgba(232,22,42,.3);padding:2px 10px;border-radius:4px;cursor:pointer;">✕</button></div><pre id="tpexDebugPre" style="white-space:pre-wrap;word-break:break-all;line-height:1.6;">載入中...</pre>';
+    document.body.appendChild(box);
+  }
+  const pre = document.getElementById('tpexDebugPre');
   let out = '';
   try {
-    const res = await fetch(API.tpexDay);
+    pre.textContent = '正在抓取 TPEX 日收盤...';
+    const res = await fetch(TPEX_PROXIES[0] + encodeURIComponent('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'));
     const raw = await res.json();
     const first = Array.isArray(raw) ? raw[0] : raw;
-    out += '=== TPEX 日收盤 第一筆欄位 ===\n' + Object.keys(first||{}).join('\n');
-    out += '\n\n範例值：\n' + JSON.stringify(first, null, 2).slice(0, 500);
-  } catch(e){ out += 'TPEX 日收盤錯誤：' + e.message; }
+    out += '=== TPEX 日收盤 (tpex_mainboard_daily_close_quotes) ===\n';
+    out += '筆數：' + (Array.isArray(raw) ? raw.length : 'N/A') + '\n';
+    out += '欄位：' + Object.keys(first||{}).join(', ') + '\n\n';
+    out += '第一筆：\n' + JSON.stringify(first, null, 2).slice(0, 600);
+  } catch(e){ out += 'TPEX 日收盤錯誤：' + e.message + '\n'; }
   out += '\n\n';
   try {
-    const res2 = await fetch(API.tpexDisposal);
+    pre.textContent = out + '正在抓取 TPEX 處置股...';
+    const res2 = await fetch(TPEX_PROXIES[0] + encodeURIComponent('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'));
     const raw2 = await res2.json();
     const first2 = Array.isArray(raw2) ? raw2[0] : raw2;
-    out += '=== TPEX 處置股 第一筆欄位 ===\n' + Object.keys(first2||{}).join('\n');
+    out += '=== TPEX 處置股 (tpex_disposal_information) ===\n';
+    out += '筆數：' + (Array.isArray(raw2) ? raw2.length : 'N/A') + '\n';
+    out += '欄位：' + Object.keys(first2||{}).join(', ') + '\n';
   } catch(e){ out += 'TPEX 處置股錯誤：' + e.message; }
-  alert(out.slice(0, 3000));
+  pre.textContent = out;
 }
 
 // ── 抓取所有資料 ──
@@ -370,11 +405,10 @@ async function fetchAll() {
   } catch(e) { errors.push(e.message); }
 
   // 3. 上櫃漲停股 (tpex_mainboard_daily_close_quotes)
-  // 實際欄位：SecuritiesCompanyCode, CompanyName, Close, Change 等
   let tpexLU = [];
   try {
     setStep('上櫃漲停股（TPEX）...');
-    const raw = await fetchJSON(API.tpexDay, 'TPEX 日收盤');
+    const raw = await fetchTPEX('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes');
     tpexLU = (Array.isArray(raw) ? raw : []).filter(r => {
       const chg = parseFloat(r['Change'] || r['漲跌'] || r['PriceChange'] || '0');
       const cls = parseFloat(r['Close']  || r['收盤價'] || r['ClosingPrice'] || '0');
@@ -391,11 +425,10 @@ async function fetchAll() {
   } catch(e) { errors.push(e.message); }
 
   // 4. 上櫃處置股 (tpex_disposal_information)
-  // 實際欄位：SecuritiesCompanyCode, CompanyName, DispositionPeriod, DispositionReasons
   let tpexDP = [];
   try {
     setStep('上櫃處置股（TPEX）...');
-    const raw = await fetchJSON(API.tpexDisposal, 'TPEX 處置股');
+    const raw = await fetchTPEX('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information');
     tpexDP = (Array.isArray(raw) ? raw : []).map(r => {
       const period = r['DispositionPeriod'] || '';
       const parts  = period.split('~');

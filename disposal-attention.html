@@ -262,13 +262,29 @@ tbody td.r{text-align:right;font-family:'JetBrains Mono',monospace;}
 
 <script>
 const PROXY = 'https://corsproxy.io/?url=';
-const PROXY_TPEX = 'https://api.allorigins.win/raw?url=';
+const p = u => PROXY + encodeURIComponent(u);
 
-// TWSE 用 corsproxy，TPEX 用 allorigins（corsproxy 被 TPEX 擋住）
-const p = u => {
-  if (u.includes('tpex.org.tw')) return PROXY_TPEX + encodeURIComponent(u);
-  return PROXY + encodeURIComponent(u);
-};
+const TPEX_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://thingproxy.freeboard.io/fetch/',
+];
+async function fetchTPEX(url) {
+  for (const proxy of TPEX_PROXIES) {
+    try {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 8000);
+      const res = await fetch(proxy + encodeURIComponent(url), { signal: ctrl.signal });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('[TPEX OK]', proxy.split('?')[0]);
+        return data;
+      }
+    } catch(e) { console.warn('[TPEX fail]', e.message); }
+  }
+  throw new Error('所有 TPEX proxy 均失敗');
+}
 
 const API = {
   twseDisposal: p('https://openapi.twse.com.tw/v1/announcement/punish'),
@@ -286,22 +302,13 @@ const TPEX_ATTENTION_CANDIDATES = [
 async function tryTPEX(candidates, label) {
   for (const url of candidates) {
     try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 10000);
-      const res = await fetch(p(url), { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.ok) {
-        const data = await res.json();
-        console.log('[TPEX] ' + label + ' 成功：' + url + ' 筆數:' + (Array.isArray(data)?data.length:'非陣列'));
-        return Array.isArray(data) ? data : [];
-      } else {
-        console.warn('[TPEX] ' + label + ' HTTP ' + res.status + '：' + url);
-      }
+      const data = await fetchTPEX(url);
+      console.log('[TPEX] ' + label + ' 成功：' + url + ' 筆數:' + (Array.isArray(data)?data.length:0));
+      return Array.isArray(data) ? data : [];
     } catch(e) {
-      console.warn('[TPEX] ' + label + ' 錯誤：' + e.message + ' url:' + url);
+      console.warn('[TPEX] ' + label + ' 失敗：' + e.message);
     }
   }
-  console.warn('[TPEX] ' + label + ' 所有路徑均失敗');
   return [];
 }
 
@@ -530,8 +537,7 @@ async function debugAPI(){
 
   // TPEX 注意股
   try{
-    const res3 = await fetch(p('https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information'));
-    const raw3 = await res3.json();
+    const raw3 = await fetchTPEX('https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information');
     const preview3 = (Array.isArray(raw3)?raw3:[]).slice(0,1);
     out += '=== TPEX 注意股欄位 ===\n';
     out += preview3.length ? JSON.stringify(preview3[0], null, 2) : '（無資料）';
