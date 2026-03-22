@@ -130,6 +130,7 @@ tbody td:first-child{text-align:left;font-family:'Noto Sans TC',sans-serif;}
       <div class="fs-sub" id="fsSub">資料來源：openapi.twse.com.tw（官方 OpenAPI，完全免費）</div>
     </div>
     <div class="toast" id="toast"></div>
+    <button onclick="debugTPEX()" style="font-size:11px;background:rgba(240,165,0,.1);color:var(--gold);border:1px solid rgba(240,165,0,.3);padding:5px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;">🔍 除錯TPEX</button>
   </div>
 
   <!-- STATS -->
@@ -235,8 +236,9 @@ const p = u => {
 const API = {
   twseDayAll:   p('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL'),
   twseDisposal: p('https://openapi.twse.com.tw/v1/announcement/punish'),
-  tpexDay:      p('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis'),
+  tpexDay:      p('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'),
   tpexDisposal: p('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'),
+  tpexAttention:p('https://www.tpex.org.tw/openapi/v1/tpex_trading_warning_information'),
 };
 
 let allLU = [];
@@ -274,6 +276,26 @@ async function fetchJSON(url, label) {
     if (e.name === 'AbortError') throw new Error(`${label} 連線逾時`);
     throw new Error(`${label} 失敗：${e.message}`);
   }
+}
+
+// ── 除錯：印出 TPEX 原始欄位 ──
+async function debugTPEX(){
+  let out = '';
+  try {
+    const res = await fetch(API.tpexDay);
+    const raw = await res.json();
+    const first = Array.isArray(raw) ? raw[0] : raw;
+    out += '=== TPEX 日收盤 第一筆欄位 ===\n' + Object.keys(first||{}).join('\n');
+    out += '\n\n範例值：\n' + JSON.stringify(first, null, 2).slice(0, 500);
+  } catch(e){ out += 'TPEX 日收盤錯誤：' + e.message; }
+  out += '\n\n';
+  try {
+    const res2 = await fetch(API.tpexDisposal);
+    const raw2 = await res2.json();
+    const first2 = Array.isArray(raw2) ? raw2[0] : raw2;
+    out += '=== TPEX 處置股 第一筆欄位 ===\n' + Object.keys(first2||{}).join('\n');
+  } catch(e){ out += 'TPEX 處置股錯誤：' + e.message; }
+  alert(out.slice(0, 3000));
 }
 
 // ── 抓取所有資料 ──
@@ -347,40 +369,51 @@ async function fetchAll() {
     }).filter(r => r.code);
   } catch(e) { errors.push(e.message); }
 
-  // 3. 上櫃漲停股
+  // 3. 上櫃漲停股 (tpex_mainboard_daily_close_quotes)
+  // 實際欄位：SecuritiesCompanyCode, CompanyName, Close, Change 等
   let tpexLU = [];
   try {
     setStep('上櫃漲停股（TPEX）...');
-    const raw = await fetchJSON(API.tpexDay, 'TPEX 日成交');
+    const raw = await fetchJSON(API.tpexDay, 'TPEX 日收盤');
     tpexLU = (Array.isArray(raw) ? raw : []).filter(r => {
-      const chg  = parseFloat(r['漲跌'] || r['Change'] || '0');
-      const cls  = parseFloat(r['收盤價'] || r['ClosingPrice'] || '0');
+      const chg = parseFloat(r['Change'] || r['漲跌'] || r['PriceChange'] || '0');
+      const cls = parseFloat(r['Close']  || r['收盤價'] || r['ClosingPrice'] || '0');
       const prev = cls - chg;
       return chg > 0 && prev > 0 && (chg / prev) >= 0.095;
     }).map(r => ({
-      code:   r['股票代號'] || r['Code'] || '',
-      name:   r['股票名稱'] || r['Name'] || '',
-      close:  parseFloat(r['收盤價'] || r['ClosingPrice'] || '0'),
-      change: parseFloat(r['漲跌']   || r['Change']       || '0'),
-      vol:    0,
+      code:   r['SecuritiesCompanyCode'] || r['Code'] || r['股票代號'] || '',
+      name:   r['CompanyName'] || r['Name'] || r['股票名稱'] || '',
+      close:  parseFloat(r['Close'] || r['收盤價'] || r['ClosingPrice'] || '0'),
+      change: parseFloat(r['Change'] || r['漲跌'] || '0'),
+      vol:    parseInt((r['TradingShares'] || r['成交股數'] || r['Volume'] || '0').toString().replace(/,/g,''), 10),
       market: 'TPEX',
-    })).filter(r => r.code);
+    })).filter(r => r.code && r.code.length <= 4);
   } catch(e) { errors.push(e.message); }
 
-  // 4. 上櫃處置股
+  // 4. 上櫃處置股 (tpex_disposal_information)
+  // 實際欄位：SecuritiesCompanyCode, CompanyName, DispositionPeriod, DispositionReasons
   let tpexDP = [];
   try {
     setStep('上櫃處置股（TPEX）...');
     const raw = await fetchJSON(API.tpexDisposal, 'TPEX 處置股');
-    tpexDP = (Array.isArray(raw) ? raw : []).map(r => ({
-      code:      r['股票代號'] || r['Code'] || '',
-      name:      r['股票名稱'] || r['Name'] || '',
-      startDate: r['開始日期'] || r['StartDate'] || '',
-      endDate:   r['終止日期'] || r['EndDate']   || '',
-      reason:    r['處置原因'] || r['Reason']    || '',
-      interval:  r['撮合間隔'] || r['Interval']  || '',
-      market:    'TPEX',
-    })).filter(r => r.code);
+    tpexDP = (Array.isArray(raw) ? raw : []).map(r => {
+      const period = r['DispositionPeriod'] || '';
+      const parts  = period.split('~');
+      function rocNum(s) {
+        s = (s||'').trim();
+        if (s.length === 7) return (parseInt(s.slice(0,3))+1911)+'/'+s.slice(3,5)+'/'+s.slice(5,7);
+        return s;
+      }
+      return {
+        code:      r['SecuritiesCompanyCode'] || r['Code'] || '',
+        name:      r['CompanyName'] || r['Name'] || '',
+        startDate: rocNum(parts[0]),
+        endDate:   rocNum(parts[1] || ''),
+        reason:    r['DispositionReasons'] || '',
+        interval:  '',
+        market:    'TPEX',
+      };
+    }).filter(r => r.code && r.code.length <= 4);
   } catch(e) { errors.push(e.message); }
 
   // ── 整合 ──
