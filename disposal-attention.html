@@ -562,17 +562,52 @@ async function fetchAll(){
   let tpexDP = [];
   try {
     const raw = await fetchJSON(API.tpexDisposal, 'TPEX 處置股');
-    tpexDP = (Array.isArray(raw)?raw:[]).map(r => ({
-      code: r['股票代號']||r.Code||'',
-      name: r['股票名稱']||r.Name||'',
-      period: r['處置期間']||r.DispositionPeriod||'',
-      market:'TPEX',
-      nth: r['處置次數']||'1',
-      reason: r['處置原因']||r.ReasonsOfDisposition||'',
-      measures: r['處置措施']||'',
-      Detail: '',
-      daysLeft: calcDaysLeft(r['截止日期']||r['EndDate']||''),
-    })).filter(r=>r.code);
+    // 實際欄位：SecuritiesCompanyCode, CompanyName,
+    //           DispositionPeriod("1150323~1150407"),
+    //           DispositionReasons, DispositionCondition（含撮合間隔）
+    tpexDP = (Array.isArray(raw)?raw:[]).map(r => {
+      const period = r.DispositionPeriod || '';
+      const parts  = period.split('~');
+
+      // 民國8碼 1150323 → 2026/03/23
+      function rocNumToAD(s) {
+        s = (s||'').trim();
+        if (s.length === 7) {
+          const y = parseInt(s.slice(0,3)) + 1911;
+          return y + '/' + s.slice(3,5) + '/' + s.slice(5,7);
+        }
+        return s;
+      }
+      const startAD = rocNumToAD(parts[0]);
+      const endAD   = rocNumToAD(parts[1] || '');
+
+      // 從 DispositionCondition 擷取撮合間隔
+      const cond = r.DispositionCondition || '';
+      const ivlMatch = cond.match(/約每(\S+?)分鐘撮合/);
+      const interval = ivlMatch ? `每${ivlMatch[1]}分鐘撮合一次` : '';
+
+      // 計算剩餘天數
+      function daysFromAD(ad) {
+        try {
+          const p = ad.split('/');
+          const end = new Date(parseInt(p[0]), parseInt(p[1])-1, parseInt(p[2]));
+          const now = new Date(); now.setHours(0,0,0,0);
+          return Math.ceil((end - now) / 86400000);
+        } catch { return null; }
+      }
+
+      return {
+        code:     r.SecuritiesCompanyCode || '',
+        name:     r.CompanyName || '',
+        period:   startAD + ' ～ ' + endAD,
+        market:   'TPEX',
+        nth:      r.NumberOfAnnouncement || '1',
+        reason:   r.DispositionReasons || '',
+        measures: interval || cond.slice(0, 30),
+        Detail:   cond,
+        daysLeft: daysFromAD(endAD),
+      };
+    }).filter(r => r.code);
   } catch(e){ errors.push(e.message); }
 
   // 3. TWSE 注意股
