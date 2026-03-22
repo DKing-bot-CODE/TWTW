@@ -299,37 +299,39 @@ async function fetchJSON(url, label) {
 
 // ── 除錯：印出 TPEX 原始欄位 ──
 async function debugTPEX(){
-  // 建立或重用除錯視窗
   let box = document.getElementById('tpexDebugBox');
   if (!box) {
     box = document.createElement('div');
     box.id = 'tpexDebugBox';
-    box.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);width:90%;max-width:680px;max-height:75vh;overflow-y:auto;background:#0f1218;border:1px solid #1a6cf0;border-radius:8px;padding:16px;z-index:9999;font-family:monospace;font-size:12px;color:#c8d4e0;';
-    box.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:10px;"><strong style="color:#e8f0f8">🔍 TPEX 除錯</strong><button onclick="this.closest(\'#tpexDebugBox\').remove()" style="background:rgba(232,22,42,.2);color:#ff8090;border:1px solid rgba(232,22,42,.3);padding:2px 10px;border-radius:4px;cursor:pointer;">✕</button></div><pre id="tpexDebugPre" style="white-space:pre-wrap;word-break:break-all;line-height:1.6;">載入中...</pre>';
+    box.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);width:92%;max-width:700px;max-height:75vh;overflow-y:auto;background:#0f1218;border:1px solid #1a6cf0;border-radius:8px;padding:16px;z-index:9999;font-family:monospace;font-size:11px;color:#c8d4e0;';
+    box.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:10px;"><strong style="color:#e8f0f8">🔍 TPEX 端點測試</strong><button onclick="document.getElementById(\'tpexDebugBox\').remove()" style="background:rgba(232,22,42,.2);color:#ff8090;border:1px solid rgba(232,22,42,.3);padding:2px 10px;border-radius:4px;cursor:pointer;">✕</button></div><pre id="tpexDebugPre" style="white-space:pre-wrap;word-break:break-all;line-height:1.7;"></pre>';
     document.body.appendChild(box);
   }
   const pre = document.getElementById('tpexDebugPre');
+  pre.textContent = '測試中，請稍候...';
+
+  const candidates = [
+    'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes',
+    'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes',
+    'https://www.tpex.org.tw/openapi/v1/tpex_securities',
+    'https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis',
+  ];
+
   let out = '';
-  try {
-    pre.textContent = '正在抓取 TPEX 日收盤...';
-    const res = await fetch(TPEX_PROXIES[0] + encodeURIComponent('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes'));
-    const raw = await res.json();
-    const first = Array.isArray(raw) ? raw[0] : raw;
-    out += '=== TPEX 日收盤 (tpex_mainboard_daily_close_quotes) ===\n';
-    out += '筆數：' + (Array.isArray(raw) ? raw.length : 'N/A') + '\n';
-    out += '欄位：' + Object.keys(first||{}).join(', ') + '\n\n';
-    out += '第一筆：\n' + JSON.stringify(first, null, 2).slice(0, 600);
-  } catch(e){ out += 'TPEX 日收盤錯誤：' + e.message + '\n'; }
-  out += '\n\n';
-  try {
-    pre.textContent = out + '正在抓取 TPEX 處置股...';
-    const res2 = await fetch(TPEX_PROXIES[0] + encodeURIComponent('https://www.tpex.org.tw/openapi/v1/tpex_disposal_information'));
-    const raw2 = await res2.json();
-    const first2 = Array.isArray(raw2) ? raw2[0] : raw2;
-    out += '=== TPEX 處置股 (tpex_disposal_information) ===\n';
-    out += '筆數：' + (Array.isArray(raw2) ? raw2.length : 'N/A') + '\n';
-    out += '欄位：' + Object.keys(first2||{}).join(', ') + '\n';
-  } catch(e){ out += 'TPEX 處置股錯誤：' + e.message; }
+  for (const url of candidates) {
+    const name = url.split('/').pop();
+    try {
+      const data = await fetchTPEX(url);
+      const first = Array.isArray(data) ? data[0] : data;
+      out += '✅ ' + name + '\n';
+      out += '   筆數：' + (Array.isArray(data) ? data.length : 'N/A') + '\n';
+      out += '   欄位：' + Object.keys(first||{}).join(', ') + '\n';
+      out += '   第一筆：' + JSON.stringify(first).slice(0,150) + '\n\n';
+    } catch(e) {
+      out += '❌ ' + name + '\n   ' + e.message + '\n\n';
+    }
+    pre.textContent = out + '...';
+  }
   pre.textContent = out;
 }
 
