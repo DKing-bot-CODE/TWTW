@@ -396,9 +396,9 @@ function renderDisposals(data){
 
 // ── 注意股風險預測 ──
 function calcRisk(r){
-  const total = parseInt(r.total || r['累積注意次數'] || r['NoticeCount'] || '1');
-  const consec = parseInt(r.consec || r['連續注意天數'] || r['ConsecutiveDays'] || '1');
-  const recent30 = parseInt(r.recent30 || r['近30日次數'] || '0');
+  const total    = parseInt(r.total    ?? 1);
+  const consec   = parseInt(r.consec   ?? 1);
+  const recent30 = parseInt(r.recent30 ?? 0);
 
   // 規則：連續3日 → 明日處置
   if(consec >= 3) return { level:'imm',  label:'極高風險', pred:'明日即可能處置', predDays:1,  pct:98 };
@@ -440,11 +440,15 @@ function renderAttention(data){
     const barCls = r.level==='imm'||r.level==='high' ? 'risk-high' : r.level==='mid' ? 'risk-mid' : 'risk-low';
     const predColor = r.level==='imm'?'color:#ff4040':r.level==='high'?'color:var(--orange)':r.level==='mid'?'color:var(--warn)':'color:#4cd88a';
     const mktBadge = `<span class="mbadge ${(d.market||'TWSE').toLowerCase()}">${d.market||'TWSE'}</span>`;
-    const total = d.total || d['累積注意次數'] || '—';
-    const consec = d.consec || d['連續注意天數'] || '—';
+    const total  = d.total  ?? '—';
+    const consec = d.consec ?? '—';
 
     return `<tr>
-      <td><div class="sn">${d.name||d['股票名稱']||'—'}</div><div class="sk">${d.code||d['股票代號']||'—'}</div></td>
+      <td>
+        <div class="sn">${d.name||'—'}</div>
+        <div class="sk">${d.code||'—'}</div>
+        ${d.criteria ? `<div style="font-size:10px;color:var(--text-dim);margin-top:2px;font-family:'Noto Sans TC',sans-serif;">${d.criteria}</div>` : ''}
+      </td>
       <td>${mktBadge}</td>
       <td class="r" style="font-family:'JetBrains Mono',monospace;color:var(--warn)">${total}</td>
       <td class="r" style="font-family:'JetBrains Mono',monospace;color:var(--orange)">${consec}</td>
@@ -529,34 +533,67 @@ async function fetchAll(){
   } catch(e){ errors.push(e.message); }
 
   // 3. TWSE 注意股
+  // 欄位：Code, Name, RecentlyMetAttentionSecuritiesCriteria
+  // 範例值："115年3月19日至115年3月20日連續二次"
   let twseAT = [];
   try {
     const raw = await fetchJSON(API.twseAttention, 'TWSE 注意股');
-    twseAT = (Array.isArray(raw)?raw:[]).map(r => ({
-      code: r['股票代號']||r.Code||'',
-      name: r['股票名稱']||r.Name||'',
-      market:'TWSE',
-      total:  r['累積注意次數']||r.NoticeCount||'1',
-      consec: r['連續注意天數']||r.ConsecutiveDays||'1',
-      recent30: r['近30日注意次數']||'0',
-      date: r['注意日期']||r.Date||'',
-    })).filter(r=>r.code);
+
+    // 解析 RecentlyMetAttentionSecuritiesCriteria 字串
+    function parseAttentionCriteria(str) {
+      if (!str) return { consec: 1, total: 1, desc: str };
+
+      // 抓連續次數：連續二次/連續三次/連續四次...
+      const consecMap = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 };
+      const consecMatch = str.match(/連續([一二三四五六七八九十]+)次/);
+      const consec = consecMatch ? (consecMap[consecMatch[1]] || 1) : 1;
+
+      // 抓總累計次數（如有「共X次」或「累計X次」）
+      const totalMatch = str.match(/(?:共|累計)([一二三四五六七八九十\d]+)次/);
+      let total = consec;
+      if (totalMatch) {
+        const t = totalMatch[1];
+        total = consecMap[t] || parseInt(t) || consec;
+      }
+
+      // 判斷是否近30日有過紀錄（字串內有兩段日期範圍代表非連續但近期有紀錄）
+      const dateCount = (str.match(/\d+年/g) || []).length;
+      const recent30 = dateCount >= 2 ? 1 : 0;
+
+      return { consec, total, recent30, desc: str };
+    }
+
+    twseAT = (Array.isArray(raw)?raw:[]).map(r => {
+      const parsed = parseAttentionCriteria(r.RecentlyMetAttentionSecuritiesCriteria || '');
+      return {
+        code:     r.Code || '',
+        name:     r.Name || '',
+        market:   'TWSE',
+        total:    parsed.total,
+        consec:   parsed.consec,
+        recent30: parsed.recent30,
+        desc:     parsed.desc,
+      };
+    }).filter(r => r.code);
   } catch(e){ errors.push(e.message); }
 
-  // 4. TPEX 注意股
+  // 4. TPEX 注意股（HTTP 502 暫時跳過，不影響 TWSE 資料）
   let tpexAT = [];
   try {
     const raw = await fetchJSON(API.tpexAttention, 'TPEX 注意股');
-    tpexAT = (Array.isArray(raw)?raw:[]).map(r => ({
-      code: r['股票代號']||r.Code||'',
-      name: r['股票名稱']||r.Name||'',
-      market:'TPEX',
-      total:  r['累積注意次數']||'1',
-      consec: r['連續注意天數']||'1',
-      recent30: '0',
-      date: r['注意日期']||'',
-    })).filter(r=>r.code);
-  } catch(e){ errors.push(e.message); }
+    tpexAT = (Array.isArray(raw)?raw:[]).map(r => {
+      const parsed = parseAttentionCriteria ? parseAttentionCriteria(r['RecentlyMetAttentionSecuritiesCriteria'] || r['注意原因'] || '') : { consec:1, total:1, recent30:0, desc:'' };
+      return {
+        code:     r['股票代號'] || r.Code || '',
+        name:     r['股票名稱'] || r.Name || '',
+        market:   'TPEX',
+        total:    parsed.total,
+        consec:   parsed.consec,
+        recent30: parsed.recent30,
+        desc:     parsed.desc,
+      };
+    }).filter(r => r.code);
+  } catch(e){ errors.push('TPEX 注意股：' + e.message); }
 
   // 整合
   const allDP = [...twseDP, ...tpexDP].sort((a,b)=>(a.daysLeft??99)-(b.daysLeft??99));
