@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台股熱力圖 — 股價漲跌即時熱力圖</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0c10; --bg2:#0f1218; --bg3:#151b25;
+  --border:#1e2836; --text:#c8d4e0; --text-dim:#5a6a7e;
+  --text-bright:#e8f0f8; --accent:#1a6cf0;
+  --red:#e8162a; --green:#00b050;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:'Noto Sans TC',sans-serif; font-size:13px; min-height:100vh; overflow-x:hidden; }
+
+header { background:var(--bg2); border-bottom:1px solid var(--border); padding:0 20px; display:flex; align-items:center; justify-content:space-between; height:52px; position:sticky; top:0; z-index:100; }
+.logo { font-size:18px; font-weight:900; color:var(--text-bright); text-decoration:none; }
+.logo span { color:var(--accent); }
+.nav-links { display:flex; gap:6px; }
+.nav-link { font-size:12px; text-decoration:none; padding:4px 12px; border-radius:4px; border:1px solid var(--border); color:var(--text-dim); transition:.15s; }
+.nav-link:hover { border-color:var(--accent); color:#6ab4ff; }
+.nav-link.active { background:rgba(26,108,240,.15); border-color:rgba(26,108,240,.3); color:#6ab4ff; }
+
+/* TOOLBAR */
+.toolbar { background:var(--bg2); border-bottom:1px solid var(--border); padding:10px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.fetch-btn { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:700; background:var(--accent); color:#fff; border:none; padding:8px 18px; border-radius:6px; cursor:pointer; font-family:'Noto Sans TC',sans-serif; transition:.15s; }
+.fetch-btn:hover:not(:disabled) { background:#2a7cf8; transform:translateY(-1px); }
+.fetch-btn:disabled { background:rgba(26,108,240,.3); color:rgba(255,255,255,.4); cursor:default; transform:none; }
+@keyframes spin { to { transform:rotate(360deg) } }
+.fetch-btn.loading .btn-icon { animation:spin .7s linear infinite; display:inline-block; }
+
+.btn-group { display:flex; gap:4px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:3px; }
+.btn-opt { padding:5px 12px; border-radius:4px; font-size:12px; cursor:pointer; border:none; background:transparent; color:var(--text-dim); transition:.15s; font-family:'Noto Sans TC',sans-serif; }
+.btn-opt:hover { color:var(--text-bright); }
+.btn-opt.active { background:var(--bg2); color:var(--text-bright); border:1px solid var(--border); }
+
+.index-badge { font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; padding:5px 14px; border-radius:5px; border:1px solid var(--border); background:var(--bg3); }
+.status-txt { font-size:11px; color:var(--text-dim); font-family:'JetBrains Mono',monospace; }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.live { width:6px; height:6px; background:var(--red); border-radius:50%; display:inline-block; animation:blink 1.2s infinite; margin-right:4px; }
+
+/* HEATMAP */
+.heatmap-wrap { padding:12px 20px; }
+.industry-label { font-size:11px; color:rgba(200,212,224,.5); padding:2px 4px; pointer-events:none; position:absolute; bottom:2px; left:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+#heatmap { width:100%; position:relative; }
+
+.hm-industry { position:absolute; border:2px solid var(--bg); border-radius:2px; overflow:hidden; }
+.hm-industry-name { position:absolute; bottom:0; left:0; right:0; font-size:10px; color:rgba(255,255,255,.6); padding:2px 5px; background:rgba(0,0,0,.35); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; z-index:2; }
+
+.hm-cell { position:absolute; border:1px solid rgba(0,0,0,.3); border-radius:2px; overflow:hidden; cursor:pointer; transition:filter .1s, transform .1s; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+.hm-cell:hover { filter:brightness(1.25); transform:scale(1.02); z-index:10; }
+.hm-cell .cell-name { font-weight:700; color:#fff; text-align:center; line-height:1.2; white-space:nowrap; overflow:hidden; width:100%; text-align:center; padding:0 2px; }
+.hm-cell .cell-pct  { font-family:'JetBrains Mono',monospace; font-weight:600; color:rgba(255,255,255,.9); text-align:center; }
+.hm-cell .cell-price { font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(255,255,255,.6); }
+
+/* tooltip */
+.tooltip { position:fixed; background:#0f1218; border:1px solid var(--border); border-radius:6px; padding:10px 14px; font-size:12px; pointer-events:none; z-index:999; min-width:160px; box-shadow:0 4px 20px rgba(0,0,0,.5); }
+.tt-name { font-size:14px; font-weight:700; color:var(--text-bright); margin-bottom:6px; }
+.tt-row { display:flex; justify-content:space-between; gap:20px; color:var(--text-dim); margin-bottom:2px; }
+.tt-val { color:var(--text-bright); font-family:'JetBrains Mono',monospace; }
+
+/* loading */
+.loading-box { display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; gap:14px; color:var(--text-dim); }
+.spinner { width:32px; height:32px; border:3px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
+.err-box { margin:20px; padding:14px; background:rgba(232,22,42,.07); border:1px solid rgba(232,22,42,.2); border-radius:6px; color:#ff8090; font-size:12px; line-height:1.7; }
+
+.toast { font-size:11px; padding:5px 12px; border-radius:5px; font-weight:600; opacity:0; transition:opacity .3s; }
+.toast.ok  { background:rgba(0,176,80,.15); color:#4cd88a; border:1px solid rgba(0,176,80,.3); }
+.toast.err { background:rgba(232,22,42,.1);  color:#ff8090; border:1px solid rgba(232,22,42,.25); }
+.toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<header>
+  <a class="logo" href="index.html">台股<span>資訊</span>站</a>
+  <div class="nav-links">
+    <a class="nav-link" href="index.html">首頁</a>
+    <a class="nav-link" href="disposal-attention.html">⚠ 處置股 × 注意股</a>
+    <a class="nav-link active" href="heatmap.html">🔥 熱力圖</a>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button class="fetch-btn" id="fetchBtn" onclick="fetchData()">
+    <span class="btn-icon">↺</span>
+    <span class="btn-label">立即抓取</span>
+  </button>
+
+  <div class="btn-group" id="marketGroup">
+    <button class="btn-opt active" onclick="setMarket('both',this)">上市+上櫃</button>
+    <button class="btn-opt" onclick="setMarket('twse',this)">上市</button>
+    <button class="btn-opt" onclick="setMarket('tpex',this)">上櫃</button>
+  </div>
+
+  <div class="btn-group" id="sizeGroup">
+    <button class="btn-opt active" onclick="setSize('capital',this)">市值</button>
+    <button class="btn-opt" onclick="setSize('volume',this)">成交量</button>
+  </div>
+
+  <div class="btn-group" id="groupGroup">
+    <button class="btn-opt active" onclick="setGroup('industry',this)">區分產業</button>
+    <button class="btn-opt" onclick="setGroup('none',this)">不分產業</button>
+  </div>
+
+  <div id="indexBadge" class="index-badge" style="color:var(--text-dim)">加權指數 —</div>
+  <span class="status-txt"><span class="live"></span><span id="statusTxt">尚未載入</span></span>
+  <div class="toast" id="toast"></div>
+</div>
+
+<div class="heatmap-wrap">
+  <div id="heatmap">
+    <div class="loading-box"><div class="spinner"></div><span>點擊「立即抓取」取得資料</span></div>
+  </div>
+</div>
+
+<div id="tooltip" class="tooltip" style="display:none"></div>
+
+<script>
+const PROXY = 'https://corsproxy.io/?url=';
+const p = u => PROXY + encodeURIComponent(u);
+
+const TPEX_PROXIES = [
+  'https://api.allorigins.win/raw?url=',
+  'https://corsproxy.io/?url=',
+  'https://api.codetabs.com/v1/proxy?quest=',
+  'https://thingproxy.freeboard.io/fetch/',
+];
+async function fetchTPEX(url) {
+  for (const proxy of TPEX_PROXIES) {
+    try {
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 10000);
+      const res = await fetch(proxy + encodeURIComponent(url), { signal: ctrl.signal });
+      if (res.ok) return await res.json();
+    } catch(e) {}
+  }
+  throw new Error('TPEX proxy 全部失敗');
+}
+
+// ── 台股產業分類對照表 ──
+const INDUSTRY_MAP = {
+  '水泥':'建材',   '食品':'食品',   '塑膠':'塑化',   '紡織纖維':'紡織',
+  '電機機械':'電機','電器電纜':'電纜','化學':'化學',  '生技醫療':'生技',
+  '玻璃陶瓷':'玻璃','造紙':'造紙',  '鋼鐵':'鋼鐵',  '橡膠':'橡膠',
+  '汽車':'汽車',   '電子':'電子組件','半導體':'半導體','電腦及周邊':'電腦',
+  '光電':'光電',   '通信網路':'網通', '電子零組件':'電子零件',
+  '電子通路':'通路','資訊服務':'資訊', '其他電子':'其他電子',
+  '建材營造':'建材','航運':'航運',  '觀光':'觀光',   '金融保險':'金融',
+  '貿易百貨':'貿易','油電燃氣':'油電','其他':'其他',
+};
+
+// ── 漲跌顏色 ──
+function pctColor(pct) {
+  const v = Math.max(-10, Math.min(10, pct));
+  if (v >= 9.5)  return '#cc0000';
+  if (v >= 5)    return '#e03030';
+  if (v >= 3)    return '#d04040';
+  if (v >= 1)    return '#b05050';
+  if (v >= 0)    return '#1a6035';
+  if (v >= -1)   return '#1a7040';
+  if (v >= -3)   return '#1a8050';
+  if (v >= -5)   return '#108060';
+  if (v >= -9.5) return '#006040';
+  return '#005030';
+}
+
+// ── 狀態 ──
+let allStocks = [];
+let market = 'both';
+let sizeBy = 'capital';
+let groupBy = 'industry';
+
+function setMarket(v, el) {
+  market = v;
+  document.querySelectorAll('#marketGroup .btn-opt').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderHeatmap();
+}
+function setSize(v, el) {
+  sizeBy = v;
+  document.querySelectorAll('#sizeGroup .btn-opt').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderHeatmap();
+}
+function setGroup(v, el) {
+  groupBy = v;
+  document.querySelectorAll('#groupGroup .btn-opt').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  renderHeatmap();
+}
+
+// ── 抓資料 ──
+async function fetchData() {
+  const btn = document.getElementById('fetchBtn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  btn.querySelector('.btn-label').textContent = '抓取中...';
+  document.getElementById('heatmap').innerHTML = '<div class="loading-box"><div class="spinner"></div><span>正在取得資料...</span></div>';
+
+  const errors = [];
+  let twseData = [], tpexData = [];
+
+  // TWSE
+  try {
+    document.querySelector('.loading-box span').textContent = '取得上市個股資料...';
+    const raw = await fetch(p('https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL')).then(r => r.json());
+    twseData = (Array.isArray(raw) ? raw : []).map(r => ({
+      code:     r.Code || '',
+      name:     r.Name || '',
+      close:    parseFloat(r.ClosingPrice) || 0,
+      change:   parseFloat(r.Change) || 0,
+      pct:      0,
+      vol:      parseInt((r.TradeVolume||'0').replace(/,/g,'')) || 0,
+      capital:  parseInt((r.TradeValue||'0').replace(/,/g,'')) || 0,
+      market:   'TWSE',
+      industry: r.IndustryName || r.Industry || '其他',
+    })).filter(r => r.code && r.code.length <= 4 && r.close > 0)
+      .map(r => ({ ...r, pct: r.close - r.change > 0 ? (r.change / (r.close - r.change)) * 100 : 0 }));
+  } catch(e) { errors.push('TWSE: ' + e.message); }
+
+  // TPEX
+  try {
+    document.querySelector('.loading-box span') && (document.querySelector('.loading-box span').textContent = '取得上櫃個股資料...');
+    const raw = await fetchTPEX('https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes');
+    tpexData = (Array.isArray(raw) ? raw : []).map(r => {
+      const close  = parseFloat(r.Close) || 0;
+      const change = parseFloat((r.Change||'0').toString().trim()) || 0;
+      const prev   = close - change;
+      const pct    = prev > 0 ? (change / prev) * 100 : 0;
+      return {
+        code:     r.SecuritiesCompanyCode || '',
+        name:     r.CompanyName || '',
+        close, change, pct,
+        vol:      parseInt((r.TradingShares||'0').toString().replace(/,/g,'')) || 0,
+        capital:  parseInt((r.TransactionAmount||'0').toString().replace(/,/g,'')) || 0,
+        market:   'TPEX',
+        industry: '上櫃',
+      };
+    }).filter(r => r.code && r.code.length <= 4 && r.close > 0);
+  } catch(e) { errors.push('TPEX: ' + e.message); }
+
+  allStocks = [...twseData, ...tpexData];
+
+  const now = new Date();
+  const ts = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+  document.getElementById('statusTxt').textContent = ts;
+
+  btn.disabled = false;
+  btn.classList.remove('loading');
+  btn.querySelector('.btn-label').textContent = '立即抓取';
+
+  if (errors.length) {
+    showToast(false, '部分失敗：' + errors[0]);
+  } else {
+    showToast(true, `✓ 完成！${allStocks.length} 支股票`);
+  }
+
+  renderHeatmap();
+}
+
+// ── 渲染熱力圖（treemap 演算法）──
+function renderHeatmap() {
+  const hm = document.getElementById('heatmap');
+  if (!allStocks.length) return;
+
+  // 篩選
+  let stocks = allStocks.filter(s => {
+    if (market === 'twse') return s.market === 'TWSE';
+    if (market === 'tpex') return s.market === 'TPEX';
+    return true;
+  }).filter(s => (sizeBy === 'capital' ? s.capital : s.vol) > 0);
+
+  // 取大小值
+  const maxVal = Math.max(...stocks.map(s => sizeBy === 'capital' ? s.capital : s.vol));
+
+  // 加權指數顯示
+  const twse = allStocks.filter(s => s.market === 'TWSE');
+  if (twse.length) {
+    const avgPct = twse.reduce((a,b) => a + b.pct, 0) / twse.length;
+    const badge = document.getElementById('indexBadge');
+    badge.style.color = avgPct >= 0 ? 'var(--red)' : 'var(--green)';
+    badge.textContent = `加權 avg ${avgPct >= 0 ? '+' : ''}${avgPct.toFixed(2)}%`;
+  }
+
+  const W = hm.offsetWidth || window.innerWidth - 40;
+  const H = Math.max(window.innerHeight - 200, 500);
+  hm.style.height = H + 'px';
+  hm.style.position = 'relative';
+  hm.innerHTML = '';
+
+  if (groupBy === 'none') {
+    // 不分產業，直接 treemap
+    drawTreemap(hm, stocks, 0, 0, W, H, maxVal);
+  } else {
+    // 依產業分組
+    const groups = {};
+    stocks.forEach(s => {
+      const ind = s.industry || '其他';
+      if (!groups[ind]) groups[ind] = [];
+      groups[ind].push(s);
+    });
+
+    // 按組內總市值排序
+    const sortedGroups = Object.entries(groups)
+      .map(([name, items]) => ({
+        name,
+        items,
+        total: items.reduce((a,b) => a + (sizeBy === 'capital' ? b.capital : b.vol), 0)
+      }))
+      .filter(g => g.total > 0)
+      .sort((a,b) => b.total - a.total);
+
+    const totalAll = sortedGroups.reduce((a,b) => a + b.total, 0);
+
+    // 計算各產業方塊的位置（squarified treemap）
+    const rects = squarify(sortedGroups.map(g => g.total), totalAll, 0, 0, W, H);
+
+    sortedGroups.forEach((group, i) => {
+      const rect = rects[i];
+      if (!rect) return;
+
+      // 產業標籤容器
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;border:2px solid var(--bg);overflow:hidden;`;
+      hm.appendChild(wrapper);
+
+      // 內部子 treemap（留底部給標籤）
+      const labelH = rect.h > 50 ? 18 : 0;
+      const groupMax = Math.max(...group.items.map(s => sizeBy === 'capital' ? s.capital : s.vol));
+      drawTreemap(wrapper, group.items, 0, 0, rect.w, rect.h - labelH, groupMax);
+
+      // 產業名稱
+      if (labelH > 0) {
+        const lbl = document.createElement('div');
+        lbl.style.cssText = `position:absolute;bottom:0;left:0;right:0;height:${labelH}px;background:rgba(10,12,16,.7);font-size:10px;color:rgba(200,212,224,.6);padding:2px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;`;
+        lbl.textContent = group.name + ' -';
+        wrapper.appendChild(lbl);
+      }
+    });
+  }
+}
+
+function drawTreemap(container, stocks, x, y, w, h, maxVal) {
+  if (!stocks.length || w <= 0 || h <= 0) return;
+  const sorted = [...stocks].sort((a,b) => (sizeBy==='capital'?b.capital-a.capital:b.vol-a.vol));
+  const totalVal = sorted.reduce((a,s) => a + (sizeBy==='capital'?s.capital:s.vol), 0);
+  const rects = squarify(sorted.map(s => sizeBy==='capital'?s.capital:s.vol), totalVal, x, y, w, h);
+
+  sorted.forEach((s, i) => {
+    const r = rects[i];
+    if (!r || r.w < 4 || r.h < 4) return;
+
+    const cell = document.createElement('div');
+    cell.className = 'hm-cell';
+    cell.style.cssText = `left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px;background:${pctColor(s.pct)};`;
+
+    const fs = Math.min(r.w / s.name.length * 1.4, r.h / 3.5, 18);
+    if (fs >= 7 && r.h >= 20) {
+      const nameEl = document.createElement('div');
+      nameEl.className = 'cell-name';
+      nameEl.style.fontSize = Math.max(7, fs) + 'px';
+      nameEl.textContent = s.name;
+      cell.appendChild(nameEl);
+
+      if (r.h >= 32 && fs >= 8) {
+        const pctEl = document.createElement('div');
+        pctEl.className = 'cell-pct';
+        pctEl.style.fontSize = Math.max(7, fs * 0.85) + 'px';
+        pctEl.textContent = (s.pct >= 0 ? '+' : '') + s.pct.toFixed(2) + '%';
+        cell.appendChild(pctEl);
+      }
+    }
+
+    // Tooltip
+    cell.addEventListener('mouseenter', e => showTooltip(e, s));
+    cell.addEventListener('mousemove',  e => moveTooltip(e));
+    cell.addEventListener('mouseleave', hideTooltip);
+
+    container.appendChild(cell);
+  });
+}
+
+// ── Squarified Treemap ──
+function squarify(values, total, x, y, w, h) {
+  const rects = new Array(values.length);
+  if (!total) return rects;
+
+  function layout(items, x, y, w, h, offset) {
+    if (!items.length) return;
+    if (items.length === 1) {
+      rects[offset] = { x, y, w, h };
+      return;
+    }
+
+    const half = Math.floor(items.length / 2);
+    const sumA = items.slice(0, half).reduce((a,b) => a+b, 0);
+    const sumB = items.slice(half).reduce((a,b) => a+b, 0);
+    const sumAll = sumA + sumB;
+
+    if (w >= h) {
+      const wA = w * sumA / sumAll;
+      layoutRow(items.slice(0, half), x, y, wA, h, offset);
+      layoutRow(items.slice(half), x + wA, y, w - wA, h, offset + half);
+    } else {
+      const hA = h * sumA / sumAll;
+      layoutRow(items.slice(0, half), x, y, w, hA, offset);
+      layoutRow(items.slice(half), x, y + hA, w, h - hA, offset + half);
+    }
+  }
+
+  function layoutRow(items, x, y, w, h, offset) {
+    const sum = items.reduce((a,b) => a+b, 0);
+    if (!sum) return;
+    if (w >= h) {
+      let cx = x;
+      items.forEach((v, i) => {
+        const cw = w * v / sum;
+        rects[offset + i] = { x: cx, y, w: cw, h };
+        cx += cw;
+      });
+    } else {
+      let cy = y;
+      items.forEach((v, i) => {
+        const ch = h * v / sum;
+        rects[offset + i] = { x, y: cy, w, h: ch };
+        cy += ch;
+      });
+    }
+  }
+
+  layout(values, x, y, w, h, 0);
+  return rects;
+}
+
+// ── Tooltip ──
+function showTooltip(e, s) {
+  const tt = document.getElementById('tooltip');
+  tt.style.display = 'block';
+  const sign = s.pct >= 0 ? '+' : '';
+  const chgSign = s.change >= 0 ? '+' : '';
+  tt.innerHTML = `
+    <div class="tt-name">${s.name} <span style="font-size:11px;color:var(--text-dim);font-family:'JetBrains Mono',monospace">${s.code}</span></div>
+    <div class="tt-row"><span>收盤價</span><span class="tt-val">${s.close.toLocaleString()}</span></div>
+    <div class="tt-row"><span>漲跌</span><span class="tt-val" style="color:${s.pct>=0?'var(--red)':'var(--green)'}">${chgSign}${s.change.toFixed(2)} (${sign}${s.pct.toFixed(2)}%)</span></div>
+    <div class="tt-row"><span>成交量</span><span class="tt-val">${s.vol.toLocaleString()} 張</span></div>
+    <div class="tt-row"><span>市場</span><span class="tt-val">${s.market}</span></div>
+    ${s.industry ? `<div class="tt-row"><span>產業</span><span class="tt-val">${s.industry}</span></div>` : ''}
+  `;
+  moveTooltip(e);
+}
+function moveTooltip(e) {
+  const tt = document.getElementById('tooltip');
+  const x = e.clientX + 14;
+  const y = e.clientY - 10;
+  const maxX = window.innerWidth - 200;
+  const maxY = window.innerHeight - 160;
+  tt.style.left = Math.min(x, maxX) + 'px';
+  tt.style.top  = Math.min(y, maxY) + 'px';
+}
+function hideTooltip() {
+  document.getElementById('tooltip').style.display = 'none';
+}
+
+function showToast(ok, msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (ok ? 'ok' : 'err');
+  void t.offsetWidth;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 4000);
+}
+
+// 視窗大小改變時重繪
+window.addEventListener('resize', () => { if (allStocks.length) renderHeatmap(); });
+</script>
+</body>
+</html>
