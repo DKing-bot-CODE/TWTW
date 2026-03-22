@@ -389,8 +389,11 @@ function renderDisposals(data){
     const nthBadge = `<span class="nth-badge nth-${Math.min(nth,3)}">${nth === 1 ? '第1次' : nth === 2 ? '第2次' : '第'+nth+'次'}處置</span>`;
     const mktBadge = `<span class="mbadge ${d.market.toLowerCase()}">${d.market}</span>`;
 
-    // 民國日期轉西元 115/03/10 → 2026/03/10
-    const periodAD = (d.period||d.DispositionPeriod||'').replace(/(\d{3})\//g, function(m,y){ return (parseInt(y)+1911)+'/'; });
+    // 民國日期轉西元：只轉 3碼民國年（如 115/03/10），已是西元的不動
+    const periodAD = (d.period||d.DispositionPeriod||'').replace(/\b(\d{3})\//g, function(m,y){
+      const yi = parseInt(y);
+      return yi < 200 ? (yi+1911)+'/' : m; // 民國年 < 200，西元年 > 200 不轉
+    });
 
     // 從 Detail 擷取撮合間隔
     const detail = d.Detail || d.detail || '';
@@ -610,7 +613,7 @@ async function fetchAll(){
         Detail:   cond,
         daysLeft: daysFromAD(endAD),
       };
-    }).filter(r => r.code);
+    }).filter(r => r.code && r.code.length <= 4); // 過濾債券（代號5碼以上）
   } catch(e){ errors.push(e.message); }
 
   // 3. TWSE 注意股
